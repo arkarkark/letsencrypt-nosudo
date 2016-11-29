@@ -119,6 +119,9 @@ the script and will be destroyed when the script stops. They only contain the
 protocol requests and signatures. They do NOT contain your private keys
 because this script does not have access to your private keys.
 
+Then when you're done, upload the certificate and private key to
+[Google Cloud Console App Engine Certificates Settings](https://console.cloud.google.com/appengine/settings/certificates).
+
 ###Help text
 ```
 user@hostname:~$ python sign_csr.py --help
