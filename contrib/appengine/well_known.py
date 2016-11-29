@@ -6,16 +6,13 @@ Add this to your app.yaml:
 - url: /.well-known/acme-challenge/.*
   script: well_known.app
 
-Then you need to get the password (works one time for admins only):
+Then you need to get the password from this url (for admins only):
 
 http://example.com/.well-known/acme-challenge/
 
-If you forget the password go to this url and see it or remove it and generate a new one
-https://console.cloud.google.com/datastore/entities/query?kind=WellKnownPassword
-
 POST requests to /.well-known/acme-challenge/ with this json
 {"password": "THEPASSWORD", "fact", "SOME_FACT.WITH_A_DOT"}
-will establish a fact
+will establish a fact and return {"status": "success"}
 
 Now GET requests to /.well-known/acme-challenge/SOME_FACT will return
 SOME_FACT.WITH_A_DOT
@@ -27,6 +24,8 @@ You can test it with this command:
 
 curl -v -o - -H "Content-Type: application/json" -X POST -d \
   '{"fact":"xyz.abc","password":"THEPASSWORD"}' http://example.com/.well-known/acme-challenge/
+
+open http://example.com/.well-known/acme-challenge/xyz
 """
 __author__ = 'wtwf.com (Alex K)'
 
@@ -43,8 +42,7 @@ class WellKnownPassword(ndb.Model):
 
 WELL_KNOWN_MEMCACHE_PREFIX = '/.well-known/acme-challenge/'
 
-class WellKnownPublicHandler(webapp.RequestHandler):
-
+class WellKnownHandler(webapp.RequestHandler):
 
   def get(self, url):
     if url:
@@ -54,19 +52,18 @@ class WellKnownPublicHandler(webapp.RequestHandler):
       else:
         self.error(404)
     else:
-      # make a pssword if there is none
-      if WellKnownPassword.query().iter().has_next():
-        self.error(403)
+      if not users.get_current_user():
+        self.redirect(users.create_login_url(self.request.uri))
       else:
-        if users.get_current_user():
-          if users.is_current_user_admin():
+        if not users.is_current_user_admin():
+          self.error(403)
+        else:
+          if WellKnownPassword.query().iter().has_next():
+            password = WellKnownPassword.query().get().password
+          else:
             password = str(uuid.uuid4())
             WellKnownPassword(password=password).put()
-            self.response.out.write(password)
-          else:
-            self.error(400)
-        else:
-          self.redirect(users.create_login_url(self.request.uri))
+          self.response.out.write(password)
 
   def post(self, url):
     req = json.loads(self.request.body)
@@ -88,4 +85,4 @@ class WellKnownPublicHandler(webapp.RequestHandler):
           self.response.out.write(json.dumps({"status": "success"}))
 
 
-app = webapp.WSGIApplication([('/.well-known/acme-challenge/(.*)', WellKnownPublicHandler)])
+app = webapp.WSGIApplication([('/.well-known/acme-challenge/(.*)', WellKnownHandler)])

@@ -464,11 +464,12 @@ Prerequisites:
 
 Example: Generate an account keypair, a domain key and csr, and have the domain csr signed.
 --------------
-$ openssl genrsa 4096 > user.key
+$ DOMAIN=example.com
+$ openssl genrsa 2048 > user.key
 $ openssl rsa -in user.key -pubout > user.pub
-$ openssl genrsa 4096 > domain.key
-$ openssl req -new -sha256 -key domain.key -subj "/CN=example.com" > domain.csr
-$ python sign_csr.py --public-key user.pub domain.csr > signed.crt
+$ openssl genrsa 2048 > ${DOMAIN}.key
+$ openssl req -new -sha256 -key domain.key -subj "/CN=${DOMAIN}.com" > ${DOMAIN}.csr
+$ python sign_csr.py --public-key user.pub ${DOMAIN}.csr > ${DOMAIN}.signed.crt
 --------------
 
 """)

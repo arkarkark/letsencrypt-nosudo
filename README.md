@@ -1,3 +1,7 @@
+#Let's Encrypt Without Sudo for App Engine
+
+This is a fork of [letsencrypt-nosudo](https://github.com/diafygi/letsencrypt-nosudo) that has support for App Engine.
+
 #Let's Encrypt Without Sudo
 
 The [Let's Encrypt](https://letsencrypt.org/) initiative is a fantastic program
@@ -50,6 +54,17 @@ but they do fantastic work.
 * openssl
 * python
 
+##Add well_known.py to your App Engine app
+
+Copy [contrib/appengine/well_known.py](blob/master/contrib/appengine/well_known.py) to your app engine app and add the following lines to your app.yaml (near the top)
+
+```yaml
+- url: /.well-known/acme-challenge/.*
+  script: well_known.app
+```
+
+Deploy and go to `/.well-known/acme-challenge/` on your app and save the response in a `well-known.txt`
+
 ##How to use the signing script
 
 First, you need to generate an user account key for Let's Encrypt.
@@ -58,7 +73,7 @@ already have user account key with Let's Encrypt, you can skip this
 step.
 
 ```sh
-openssl genrsa 4096 > user.key
+openssl genrsa 2048 > user.key
 openssl rsa -in user.key -pubout > user.pub
 ```
 
@@ -69,21 +84,22 @@ and CSR for your domain, you can skip this step.
 
 ```sh
 #Create a CSR for example.com
-openssl genrsa 4096 > domain.key
-openssl req -new -sha256 -key domain.key -subj "/CN=example.com" > domain.csr
+DOMAIN=example.com
+openssl genrsa 2048 > ${DOMAIN}.key
+openssl req -new -sha256 -key domain.key -subj "/CN=${DOMAIN}" > domain.csr
 
-#Alternatively, if you want both example.com and www.example.com
-openssl genrsa 4096 > domain.key
-openssl req -new -sha256 -key domain.key -subj "/" -reqexts SAN -config <(cat /etc/ssl/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:example.com,DNS:www.example.com")) > domain.csr
+#Alternatively, if you want both ${DOMAIN} and www.${DOMAIN}
+openssl genrsa 4096 > ${DOMAIN}.key
+openssl req -new -sha256 -key ${DOMAIN}.key -subj "/" -reqexts SAN -config <(cat /etc/ssl/openssl.cnf /System/Library/OpenSSL/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:${DOMAIN},DNS:www.${DOMAIN}")) > ${DOMAIN}.csr
 ```
 
 Third, you run the script using python and passing in the path to your user
 account public key and the domain CSR. The paths can be relative or absolute.
 By default the script will ask you to start a webserver on port 80.  If you
-already have one, use the `--file-based` option instead.
+already have one, use the `--file-based` or `--url-based` option instead.
 
 ```sh
-python sign_csr.py --public-key user.pub domain.csr > signed.crt
+python sign_csr.py --public-key user.pub --password-file well-known.txt --url-based --run-commands domain.csr > signed.crt
 ```
 
 When you run the script, it will ask you do do some manual commands. It has to
@@ -106,13 +122,16 @@ because this script does not have access to your private keys.
 ###Help text
 ```
 user@hostname:~$ python sign_csr.py --help
-usage: sign_csr.py [-h] -p PUBLIC_KEY [-e EMAIL] csr_path
+usage: sign_csr.py [-h] -p PUBLIC_KEY [-e EMAIL] [-f] [-u]
+                   [--password-file PASSWORD_FILE] [-r]
+                   csr_path
 
 Get a SSL certificate signed by a Let's Encrypt (ACME) certificate authority and
 output that signed certificate. You do NOT need to run this script on your
 server and this script does not ask for your private keys. It will print out
 commands that you need to run with your private key or on your server as root,
 which gives you a chance to review the commands instead of trusting this script.
+You can have the script run the commands with the -r flag.
 
 NOTE: YOUR ACCOUNT KEY NEEDS TO BE DIFFERENT FROM YOUR DOMAIN KEY.
 
@@ -122,11 +141,12 @@ Prerequisites:
 
 Example: Generate an account keypair, a domain key and csr, and have the domain csr signed.
 --------------
-$ openssl genrsa 4096 > user.key
+$ DOMAIN=example.com
+$ openssl genrsa 2048 > user.key
 $ openssl rsa -in user.key -pubout > user.pub
-$ openssl genrsa 4096 > domain.key
-$ openssl req -new -sha256 -key domain.key -subj "/CN=example.com" > domain.csr
-$ python sign_csr.py --public-key user.pub domain.csr > signed.crt
+$ openssl genrsa 2048 > ${DOMAIN}.key
+$ openssl req -new -sha256 -key domain.key -subj "/CN=${DOMAIN}.com" > ${DOMAIN}.csr
+$ python sign_csr.py --public-key user.pub ${DOMAIN}.csr > ${DOMAIN}.signed.crt
 --------------
 
 positional arguments:
@@ -139,7 +159,11 @@ optional arguments:
   -e EMAIL, --email EMAIL
                         contact email, default is webmaster@<shortest_domain>
   -f, --file-based      if set, a file-based response is used
-user@hostname:~$
+  -u, --url-based       if set, a url is hit with the fact to store
+  --password-file PASSWORD_FILE
+                        This contains the password for the url-based flag's
+                        request.
+  -r, --run-commands    Run the openssl dgst commands.
 ```
 
 ##Example use of the signing script
@@ -420,5 +444,3 @@ clear what it's doing.
 
 For example, it currently can't do any ACME challenges besides 'http-01'. Maybe
 someone could do a pull request to add more challenge compatibility?
-
-
