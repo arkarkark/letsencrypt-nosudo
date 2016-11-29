@@ -3,7 +3,7 @@ import argparse, subprocess, json, os, urllib2, sys, base64, binascii, time, \
     hashlib, tempfile, re, copy, textwrap
 
 
-def sign_csr(pubkey, csr, email=None, file_based=False):
+def sign_csr(pubkey, csr, email=None, file_based=False, url_based=False, password_file='', run_commands=False):
     """Use the ACME protocol to get an ssl certificate signed by a
     certificate authority.
 
@@ -15,6 +15,9 @@ def sign_csr(pubkey, csr, email=None, file_based=False):
                             hosting should be file-based rather
                             than providing a simple python HTTP
                             server.
+    :param string url_based: An optional flag with a url to hit to set the known facts.
+    :param string password_file: An optional flag file containing the password to use with the url_based url.
+    :param bool run_commands: An optional flag to say, run the openssl commands for you.
 
     :returns: Signed Certificate (PEM format)
     :rtype: string
@@ -161,9 +164,7 @@ def sign_csr(pubkey, csr, email=None, file_based=False):
     csr_file_sig_name = os.path.basename(csr_file_sig.name)
 
     # Step 5: Ask the user to sign the registration and requests
-    sys.stderr.write("""\
-STEP 2: You need to sign some files (replace 'user.key' with your user private key).
-
+    cmd = """
 openssl dgst -sha256 -sign user.key -out {0} {1}
 {2}
 openssl dgst -sha256 -sign user.key -out {3} {4}
@@ -171,12 +172,21 @@ openssl dgst -sha256 -sign user.key -out {3} {4}
 """.format(
     reg_file_sig_name, reg_file_name,
     "\n".join("openssl dgst -sha256 -sign user.key -out {0} {1}".format(i['sig_name'], i['file_name']) for i in ids),
-    csr_file_sig_name, csr_file_name))
+    csr_file_sig_name, csr_file_name)
 
-    stdout = sys.stdout
-    sys.stdout = sys.stderr
-    raw_input("Press Enter when you've run the above commands in a new terminal window...")
-    sys.stdout = stdout
+
+    if run_commands:
+        sys.stderr.write("Running:\n%s\n" % cmd)
+        os.system(cmd)
+    else:
+        sys.stderr.write("""\
+STEP 2: You need to sign some files (replace 'user.key' with your user private key).
+
+""" + cmd)
+        stdout = sys.stdout
+        sys.stdout = sys.stderr
+        raw_input("Press Enter when you've run the above commands in a new terminal window...")
+        sys.stdout = stdout
 
     # Step 6: Load the signatures
     reg_file_sig.seek(0)
@@ -271,19 +281,24 @@ openssl dgst -sha256 -sign user.key -out {3} {4}
         })
 
     # Step 9: Ask the user to sign the challenge responses
-    sys.stderr.write("""\
-STEP 3: You need to sign some more files (replace 'user.key' with your user private key).
+    cmd = "\n".join("openssl dgst -sha256 -sign user.key -out {0} {1}".format(
+        i['sig_name'], i['file_name']) for i in tests)
 
-{0}
+    if run_commands:
+        sys.stderr.write("Running:\n%s\n" % cmd)
+        os.system(cmd)
+    else:
+      sys.stderr.write("""\
+  STEP 3: You need to sign some more files (replace 'user.key' with your user private key).
 
-""".format(
-    "\n".join("openssl dgst -sha256 -sign user.key -out {0} {1}".format(
-        i['sig_name'], i['file_name']) for i in tests)))
+  {0}
 
-    stdout = sys.stdout
-    sys.stdout = sys.stderr
-    raw_input("Press Enter when you've run the above commands in a new terminal window...")
-    sys.stdout = stdout
+  """.format(cmd))
+
+      stdout = sys.stdout
+      sys.stdout = sys.stderr
+      raw_input("Press Enter when you've run the above commands in a new terminal window...")
+      sys.stdout = stdout
 
     # Step 10: Load the response signatures
     for n, i in enumerate(ids):
@@ -292,7 +307,26 @@ STEP 3: You need to sign some more files (replace 'user.key' with your user priv
 
     # Step 11: Ask the user to host the token on their server
     for n, i in enumerate(ids):
-        if file_based:
+        if url_based:
+            password = open(password_file).read().strip()
+            json_data = json.dumps({"password": password, "fact": responses[n]['data']})
+            url = "http://%s/.well-known/acme-challenge/" % i['domain']
+            sys.stderr.write("Uploading known-fact to: %r" % url)
+            try:
+                resp = urllib2.urlopen(url, json_data)
+                result = json.loads(resp.read())
+            except urllib2.HTTPError as e:
+                sys.stderr.write("Error: well-known/acme-challenge:\n")
+                sys.stderr.write("POST {0}\n".format(url))
+                sys.stderr.write(json_data)
+                sys.stderr.write("\n")
+                sys.stderr.write(e.read())
+                sys.stderr.write("\n")
+                raise
+            if result["status"] != "success":
+                raise ValueError("non success for well-known/acme-challenge: %r", result)
+
+        elif file_based:
             sys.stderr.write("""\
 STEP {0}: Please update your server to serve the following file at this URL:
 
@@ -420,6 +454,7 @@ output that signed certificate. You do NOT need to run this script on your
 server and this script does not ask for your private keys. It will print out
 commands that you need to run with your private key or on your server as root,
 which gives you a chance to review the commands instead of trusting this script.
+You can have the script run the commands with the -r flag.
 
 NOTE: YOUR ACCOUNT KEY NEEDS TO BE DIFFERENT FROM YOUR DOMAIN KEY.
 
@@ -440,9 +475,24 @@ $ python sign_csr.py --public-key user.pub domain.csr > signed.crt
     parser.add_argument("-p", "--public-key", required=True, help="path to your account public key")
     parser.add_argument("-e", "--email", default=None, help="contact email, default is webmaster@<shortest_domain>")
     parser.add_argument("-f", "--file-based", action='store_true', help="if set, a file-based response is used")
+    parser.add_argument("-u", "--url-based", action='store_true', help="if set, a url is hit with the fact to store")
+    parser.add_argument("--password-file", help="This contains the password for the url-based flag's request.")
+    parser.add_argument("-r", "--run-commands", action='store_true', help="Run the openssl dgst commands.")
+
     parser.add_argument("csr_path", help="path to your certificate signing request")
 
     args = parser.parse_args()
-    signed_crt = sign_csr(args.public_key, args.csr_path, email=args.email, file_based=args.file_based)
-    sys.stdout.write(signed_crt)
 
+    if args.url_based and not args.password_file:
+        raise ValueError("--password-file must be provided with --url-based flag turned on.")
+
+    signed_crt = sign_csr(
+        args.public_key,
+        args.csr_path,
+        email=args.email,
+        file_based=args.file_based,
+        url_based=args.url_based,
+        password_file=args.password_file,
+        run_commands=args.run_commands,
+    )
+    sys.stdout.write(signed_crt)
