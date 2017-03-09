@@ -89,7 +89,7 @@ openssl genrsa 2048 > ${DOMAIN}.key
 openssl req -new -sha256 -key domain.key -subj "/CN=${DOMAIN}" > domain.csr
 
 #Alternatively, if you want both ${DOMAIN} and www.${DOMAIN}
-openssl genrsa 4096 > ${DOMAIN}.key
+openssl genrsa 2048 > ${DOMAIN}.key
 openssl req -new -sha256 -key ${DOMAIN}.key -subj "/" -reqexts SAN -config <(cat /etc/ssl/openssl.cnf /System/Library/OpenSSL/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:${DOMAIN},DNS:www.${DOMAIN}")) > ${DOMAIN}.csr
 ```
 
